@@ -934,7 +934,7 @@ abstract class EActiveResource extends CModel
                 throw new EActiveResourceException ('No id specified!', 500);
 
             $this->{$this->idProperty()}=$id;
-            $response=$this->query('resource','GET',$params);
+            $response=$this->getRequest('resource',$params);
             return $this->populateRecord($response->getData());
     }
     
@@ -942,10 +942,10 @@ abstract class EActiveResource extends CModel
      * Sends a direct GET request to the resource without an id. Should return all resources
      * @return array An array of EActiveResources if they exist. An empty array if none are found (or Exception if request is invalid).
      */
-    public function findAll()
+    public function findAll($params=array())
     {
             Yii::trace(get_class($this).'.findAll()','ext.EActiveResource');
-            $response=$this->query('collection');
+            $response=$this->getRequest('collection',$params);
             return $this->populateRecords($response->getData());
     }
 
@@ -1073,7 +1073,7 @@ abstract class EActiveResource extends CModel
     public function getRequest($route,$params=array(),$data=null)
     {
         $uri=$this->buildUri($route);
-        return $this->sendRequest($uri,'GET',$params,$data);
+        return $this->query($uri,'GET',$params,$data);
     }
 
     /**
