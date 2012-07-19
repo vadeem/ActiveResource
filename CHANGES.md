@@ -1,5 +1,9 @@
 #Changes:
 
+19.07.2012: Allow passing of $params array to findAll() method; finder methods now internally use
+getRequest() which itself uses the query() method (instead of sendRequest()) to always allow
+caching for all GET requests by default.
+
 ##Version 0.7:
 
 ###1. Seperation of connection information and resource information:
