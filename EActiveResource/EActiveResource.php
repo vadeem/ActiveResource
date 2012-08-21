@@ -11,11 +11,16 @@
  */
 abstract class EActiveResource extends CModel
 {
+    const BELONGS_TO='EActiveResourceBelongsToRelation';
+    const HAS_ONE='EActiveResourceHasOneRelation';
+    const HAS_MANY='EActiveResourceHasManyRelation';
+    
     protected static $_models=array();
     protected static $_connection;
     
     protected $_md;                           // The metadata object for this resource (e.g.: field names, default values)
-
+    protected $_c; //The EActiveResourceQueryCriteria object
+    protected $_related=array(); //The related ActiveResources
     protected $_new=false;
     protected $_attributes=array();
     
@@ -116,7 +121,7 @@ abstract class EActiveResource extends CModel
         );
     }
     
-    protected function buildUri($route)
+    protected function buildUri($route,$criteria=array())
     {
         $uri="";
         $routes=$this->routes();
@@ -124,6 +129,17 @@ abstract class EActiveResource extends CModel
             return $route; //the route is handled like an uri
             
         $uri=strtr($routes[$route],array(':site'=>$this->getSite(),':resource'=>$this->getResource(),':id'=>$this->getId()));
+        
+        if(isset($criteria))
+        {
+            if($criteria instanceof EActiveResourceQueryCriteria)
+                $uri.=$criteria->buildQueryString();
+            else if(is_array($criteria))
+            {
+                $newCriteria=new EActiveResourceQueryCriteria($criteria);
+                $uri.=$newCriteria->buildQueryString();
+            }
+        }
                 
         return $uri;
     }
@@ -245,6 +261,34 @@ abstract class EActiveResource extends CModel
     }
 
     /**
+    * Calls the named method which is not a class method.
+    * Do not call this method. This is a PHP magic method that we override
+    * to implement the named scope feature.
+    * @param string $name the method name
+    * @param array $parameters method parameters
+    * @return mixed the method return value
+    */
+    public function __call($name,$parameters)
+    {
+            if(isset($this->getMetaData()->relations[$name]))
+            {
+                    if(empty($parameters))
+                            return $this->getRelated($name,false);
+                    else
+                            return $this->getRelated($name,false,$parameters[0]);
+            }
+
+            $scopes=$this->scopes();
+            if(isset($scopes[$name]))
+            {
+                    $this->getQueryCriteria()->mergeWith($scopes[$name]);
+                    return $this;
+            }
+
+            return parent::__call($name,$parameters);
+    }
+    
+    /**
      * PHP sleep magic method.
      */
     public function __sleep()
@@ -265,6 +309,10 @@ abstract class EActiveResource extends CModel
                     return $this->_attributes[$name];
             else if(isset($this->getMetaData()->properties[$name]))
                     return null;
+            else if(isset($this->_related[$name]))
+                        return $this->_related[$name];
+            else if(isset($this->getMetaData()->relations[$name]))
+                        return $this->getRelated($name);
             else
                     return parent::__get($name);
     }
@@ -278,7 +326,12 @@ abstract class EActiveResource extends CModel
     public function __set($name,$value)
     {
             if($this->setAttribute($name,$value)===false)
-                parent::__set($name,$value);
+            {
+                if(isset($this->getMetaData()->relations[$name]))
+                    $this->_related[$name]=$value;
+                else
+                    parent::__set($name,$value);
+            }
     }
 
     /**
@@ -294,6 +347,10 @@ abstract class EActiveResource extends CModel
                     return true;
             else if(isset($this->getMetaData()->properties[$name]))
                     return false;
+            else if(isset($this->_related[$name]))
+                        return true;
+            else if(isset($this->getMetaData()->relations[$name]))
+                        return $this->getRelated($name)!==null;
             else
                     return parent::__isset($name);
     }
@@ -308,8 +365,152 @@ abstract class EActiveResource extends CModel
     {
             if(isset($this->getMetaData()->properties[$name]))
                     unset($this->_attributes[$name]);
+            else if(isset($this->getMetaData()->relations[$name]))
+                    unset($this->_related[$name]);
             else
                     parent::__unset($name);
+    }
+    
+    /**
+    * Returns the related resource(s).
+    * This method will return the related resources(s) of the current resource.
+    * If the relation is HAS_ONE or BELONGS_TO, it will return a single object
+    * or null if the object does not exist.
+    * If the relation is HAS_MANY or MANY_MANY, it will return an array of objects
+    * or an empty array.
+    * @param string $name the relation name (see {@link relations})
+    * @param boolean $refresh whether to reload the related objects from database. Defaults to false.
+    * @param array $params additional parameters that customize the query conditions as specified in the relation declaration.
+    * @return mixed the related object(s).
+    * @throws CEActiveResourceException if the relation is not specified in {@link relations}.
+    */
+    public function getRelated($name,$refresh=false,$params=array())
+    {
+        if(!$refresh && $params===array() && (isset($this->_related[$name]) || array_key_exists($name,$this->_related)))
+                return $this->_related[$name];
+
+        $md=$this->getMetaData();
+        if(!isset($md->relations[$name]))
+                throw new EActiveResourceException(Yii::t('ext.EActiveResource','{class} does not have relation "{name}".',
+                        array('{class}'=>get_class($this), '{name}'=>$name)));
+
+        Yii::trace('lazy loading '.get_class($this).'.'.$name,'ext.EActiveResource');
+        $relation=$md->relations[$name];
+        if($this->getIsNewResource() && !$refresh && ($relation instanceof EActiveResourceHasOneRelation || $relation instanceof EActiveResourceHasManyRelation))
+                return $relation instanceof EActiveResourceHasOneRelation ? null : array();
+
+        if($params!==array()) // dynamic query
+        {
+                $exists=isset($this->_related[$name]) || array_key_exists($name,$this->_related);
+                if($exists)
+                        $save=$this->_related[$name];
+                $r=array($name=>$params);
+        }
+        else
+                $r=$name;
+        unset($this->_related[$name]);
+
+        //lazy load resources here
+        if($relation instanceof EActiveResourceBelongsToRelation)
+        {
+            $relatedClass=$md->relations[$name]->className;
+            $relatedModel=$relatedClass::model()->findById($this->{$md->relations[$name]->foreignKey});
+            $this->_related[$name]=$relatedModel;
+        }
+        else if($relation instanceof EActiveResourceHasOneRelation)
+        {
+            $relatedClass=$md->relations[$name]->className;
+            $relatedModel=$relatedClass::model()->findById(array('condition'=>$md->relations[$name]->foreignKey.'='.$this->{$md->relations[$name]->foreignKey}));
+            $this->_related[$name]=$relatedModel;
+        }
+        else if($relation instanceof EActiveResourceHasManyRelation)
+        {
+            $relatedClass=$md->relations[$name]->className;
+            $relatedModels=$relatedClass::model()->findAll(array('condition'=>$md->relations[$name]->foreignKey.'='.$this->{$md->relations[$name]->foreignKey}));
+            $this->_related[$name]=$relatedModels;
+        }
+
+        if(!isset($this->_related[$name]))
+        {
+                if($relation instanceof EActiveResourceHasManyRelation)
+                        $this->_related[$name]=array();
+                else
+                        $this->_related[$name]=null;
+        }
+
+        if($params!==array())
+        {
+                $results=$this->_related[$name];
+                if($exists)
+                        $this->_related[$name]=$save;
+                else
+                        unset($this->_related[$name]);
+                return $results;
+        }
+        else
+                return $this->_related[$name];
+    }
+    
+    /**
+    * Returns a value indicating whether the named related object(s) has been loaded.
+    * @param string $name the relation name
+    * @return boolean a value indicating whether the named related object(s) has been loaded.
+    */
+    public function hasRelated($name)
+    {
+        return isset($this->_related[$name]) || array_key_exists($name,$this->_related);
+    }
+
+    /**
+    * Returns the query criteria associated with this model.
+    * @param boolean $createIfNull whether to create a criteria instance if it does not exist. Defaults to true.
+    * @return CDbCriteria the query criteria that is associated with this model.
+    * This criteria is mainly used by {@link scopes named scope} feature to accumulate
+    * different criteria specifications.
+    */
+    public function getQueryCriteria($createIfNull=true)
+    {
+        if($this->_c===null)
+        {
+                if(($c=$this->defaultScope())!==array() || $createIfNull)
+                        $this->_c=new EActiveResourceQueryCriteria($c);
+        }
+        return $this->_c;
+    }
+
+    /**
+    * Sets the query criteria for the current model.
+    * @param CDbCriteria $criteria the query criteria
+    * @since 1.1.3
+    */
+    public function setQueryCriteria($criteria)
+    {
+        $this->_c=$criteria;
+    }
+
+    /**
+    * Returns the default named scope that should be implicitly applied to all queries for this model.
+    * Note, default scope only applies to SELECT queries. It is ignored for INSERT, UPDATE and DELETE queries.
+    * The default implementation simply returns an empty array. You may override this method
+    * if the model needs to be queried with some default criteria (e.g. only active records should be returned).
+    * @return array the query criteria. This will be used as the parameter to the constructor
+    * of {@link CDbCriteria}.
+    */
+    public function defaultScope()
+    {
+        return array();
+    }
+
+    /**
+    * Resets all scopes and criterias applied including default scope.
+    *
+    * @return CActiveRecord
+    * @since 1.1.2
+    */
+    public function resetScope()
+    {
+        $this->_c=new EActiveResourceCriteria();
+        return $this;
     }
 
     /**
@@ -339,6 +540,16 @@ abstract class EActiveResource extends CModel
                     $model->attachBehaviors($model->behaviors());
                     return $model;
             }
+    }
+    
+    public function relations()
+    {
+            return array();
+    }
+    
+    public function scopes()
+    {
+            return array();
     }
     
     public function getAttributesToSend($attributes=null)
@@ -502,6 +713,43 @@ abstract class EActiveResource extends CModel
                     return $labels[$attribute];
             else
                     return $this->generateAttributeLabel($attribute);
+    }
+    
+    /**
+    * Returns the named relation declared for this AR class.
+    * @param string $name the relation name
+    * @return EActiveResourceRelation the named relation declared for this AR class. Null if the relation does not exist.
+    */
+    public function getActiveResourceRelation($name)
+    {
+            return isset($this->getMetaData()->relations[$name]) ? $this->getMetaData()->relations[$name] : null;
+    }
+    
+    /**
+    * Do not call this method. This method is used internally by {@link CActiveFinder} to populate
+    * related objects. This method adds a related object to this record.
+    * @param string $name attribute name
+    * @param mixed $record the related record
+    * @param mixed $index the index value in the related object collection.
+    * If true, it means using zero-based integer index.
+    * If false, it means a HAS_ONE or BELONGS_TO object and no index is needed.
+    */
+    public function addRelatedResource($name,$record,$index)
+    {
+            if($index!==false)
+            {
+                    if(!isset($this->_related[$name]))
+                            $this->_related[$name]=array();
+                    if($resource instanceof EActiveResource)
+                    {
+                            if($index===true)
+                                    $this->_related[$name][]=$resource;
+                            else
+                                    $this->_related[$name][$index]=$resource;
+                    }
+            }
+            else if(!isset($this->_related[$name]))
+                    $this->_related[$name]=$resource;
     }
 
     /**
@@ -897,6 +1145,7 @@ abstract class EActiveResource extends CModel
             if(!$this->getIsNewResource() && ($resource=$this->findById($this->getId()))!==null)
             {
                     $this->_attributes=array();
+                    $this->_related=array();
                     foreach($this->getMetaData()->properties as $name=>$value)
                     {
                             if(property_exists($this,$name))
@@ -927,14 +1176,14 @@ abstract class EActiveResource extends CModel
      * @param array $params additional params to be sent.
      * @return EActiveResource the resource found. Null if none is found.
      */
-    public function findById($id,$params=array())
+    public function findById($id,$criteria=array())
     {
             Yii::trace(get_class($this).'.findById()','ext.EActiveResource');
             if(empty($id))
                 throw new EActiveResourceException ('No id specified!', 500);
 
             $this->{$this->idProperty()}=$id;
-            $response=$this->getRequest('resource',$params);
+            $response=$this->getRequest('resource',$criteria);
             return $this->populateRecord($response->getData());
     }
     
@@ -942,10 +1191,10 @@ abstract class EActiveResource extends CModel
      * Sends a direct GET request to the resource without an id. Should return all resources
      * @return array An array of EActiveResources if they exist. An empty array if none are found (or Exception if request is invalid).
      */
-    public function findAll($params=array())
+    public function findAll($criteria=array())
     {
             Yii::trace(get_class($this).'.findAll()','ext.EActiveResource');
-            $response=$this->getRequest('collection',$params);
+            $response=$this->getRequest('collection',$criteria);
             return $this->populateRecords($response->getData());
     }
 
@@ -1066,68 +1315,69 @@ abstract class EActiveResource extends CModel
     /**
      * Send a GET request to this resource according to the supplied route (which has to be defined in routes())
      * @param string $route The route used for this request
-     * @param array $options Additional options applied to the uri as url parameters
+     * @param mixed $criteria Additional criteria for the query. Can either be an array or a EActiveResourceQueryCriteria object
      * @param array $data an associative array holding the data to be sent
      * @return EActiveResourceResponse The response object
      */
-    public function getRequest($route,$params=array(),$data=null)
+    public function getRequest($route,$criteria=array(),$data=null)
     {
-        $uri=$this->buildUri($route);
-        return $this->query($uri,'GET',$params,$data);
+        return $this->query($route,'GET',$criteria,$data);
     }
 
     /**
      * Send a PUT request to this resource according to the supplied route (which has to be defined in routes())
      * @param string $route The route used for this request
-     * @param array $options Additional options applied to the uri as url parameters
+     * @param mixed $criteria Additional criteria for the query. Can either be an array or a EActiveResourceQueryCriteria object
      * @param array $data an associative array holding the data to be sent
      * @return EActiveResourceResponse The response object
      */
-    public function putRequest($route,$params=array(),$data=null)
+    public function putRequest($route,$criteria=array(),$data=null)
     {
-        $uri=$this->buildUri($route);
-        return $this->sendRequest($uri,'PUT',$params,$data);
+        return $this->sendRequest($route,'PUT',$criteria,$data);
     }
 
     /**
      * Send a POST request to this resource according to the supplied route (which has to be defined in routes())
      * @param string $route The route used for this request
-     * @param array $options Additional options applied to the uri as url parameters
+     * @param mixed $criteria Additional criteria for the query. Can either be an array or a EActiveResourceQueryCriteria object
      * @param array $data an associative array holding the data to be sent
      * @return EActiveResourceResponse The response object
      */
-    public function postRequest($route,$params=array(),$data=null)
+    public function postRequest($route,$criteria=array(),$data=null)
     {
-        $uri=$this->buildUri($route);
-        return $this->sendRequest($uri,'POST',$params,$data);    
+        return $this->sendRequest($route,'POST',$criteria,$data);    
     }
 
     /**
      * Send a DELETE request to this resource according to the supplied route (which has to be defined in routes())
      * @param string $route The route used for this request
-     * @param array $options Additional options applied to the uri as url parameters
+     * @param mixed $criteria Additional criteria for the query. Can either be an array or a EActiveResourceQueryCriteria object
      * @param array $data an associative array holding the data to be sent
      * @return EActiveResourceResponse The response object
      */
-    public function deleteRequest($route,$params=array(),$data=null)
+    public function deleteRequest($route,$criteria=array(),$data=null)
     {
-        $uri=$this->buildUri($route);
-        return $this->sendRequest($uri,'DELETE',$params,$data);    
+        return $this->sendRequest($route,'DELETE',$criteria,$data);    
     }
     
     /**
      * Sends a request to the service
      * @param string $uri The uri used
      * @param string The method uses
-     * @param array $params Optional params array
+     * @param mixed $criteria Additional criteria for the query. Can either be an array or a EActiveResourceQueryCriteria object
      * @param array $data Optional data to be sent
      * @return EActiveResourceResponse The response 
      */
-    public function sendRequest($uri,$method,$params,$data)
+    public function sendRequest($route,$method,$criteria,$data)
     {
-        if(!empty($params))
-            $uri=$uri.'?'.http_build_query($params);
-                        
+        //create a criteria object out of an array
+        if(is_array($criteria))
+            $criteria=new EActiveResourceQueryCriteria($criteria);
+                
+        $this->applyScopes($criteria);
+        
+        $uri=$this->buildUri($route,$criteria);
+                                
         $request=new EActiveResourceRequest;
         $request->setUri($uri);
         $request->setMethod($method);
@@ -1141,17 +1391,21 @@ abstract class EActiveResource extends CModel
      * event
      * @param string $route The route to be sued by the query
      * @param string $method The method to be used (defaults to GET)
-     * @param array $params Additional params for the query
+     * @param mixed $criteria Additional criteria for the query. Can either be an array or a EActiveResourceQueryCriteria object
      * @param array $data Optional data to be sent
      * @return EActiveResourceResponse The response 
      */
-    public function query($route,$method='GET',$params=array(),$data=null)
+    public function query($route,$method='GET',$criteria=array(),$data=null)
     {
         $this->beforeFind();
-        $uri=$this->buildUri($route);
         
-        if(!empty($params))
-            $uri=$uri.'?'.http_build_query($params);
+        //create a criteria object out of an array
+        if(is_array($criteria))
+            $criteria=new EActiveResourceQueryCriteria($criteria);
+                
+        $this->applyScopes($criteria);
+        
+        $uri=$this->buildUri($route,$criteria);
                         
         $request=new EActiveResourceRequest;
         $request->setUri($uri);
@@ -1161,6 +1415,249 @@ abstract class EActiveResource extends CModel
         return $this->getConnection()->query($request);
     }
         
+/**
+         * Applies the query scopes to the given criteria.
+         * This method merges {@link dbCriteria} with the given criteria parameter.
+         * It then resets {@link dbCriteria} to be null.
+         * @param CDbCriteria $criteria the query criteria. This parameter may be modified by merging {@link dbCriteria}.
+         */
+        public function applyScopes(&$criteria)
+        {
+                if(!empty($criteria->scopes))
+                {
+                        $scs=$this->scopes();
+                        $c=$this->getQueryCriteria();
+                        foreach((array)$criteria->scopes as $k=>$v)
+                        {
+                                if(is_integer($k))
+                                {
+                                        if(is_string($v))
+                                        {
+                                                if(isset($scs[$v]))
+                                                {
+                                                        $c->mergeWith($scs[$v],true);
+                                                        continue;
+                                                }
+                                                $scope=$v;
+                                                $params=array();
+                                        }
+                                        else if(is_array($v))
+                                        {
+                                                $scope=key($v);
+                                                $params=current($v);
+                                        }
+                                }
+                                else if(is_string($k))
+                                {
+                                        $scope=$k;
+                                        $params=$v;
+                                }
+
+                                call_user_func_array(array($this,$scope),(array)$params);
+                        }
+                }
+
+                if(isset($c) || ($c=$this->getQueryCriteria(false))!==null)
+                {
+                        $c->mergeWith($criteria);
+                        $criteria=$c;
+                        $this->_c=null;
+                }
+        }
+    
+    
+}
+
+
+
+
+/**
+ * EBaseActiveResourceRelation is the base class for all active relations.
+ */
+class EBaseActiveResourceRelation extends CComponent
+{
+        /**
+         * @var string name of the related object
+         */
+        public $name;
+        /**
+         * @var string name of the related active record class
+         */
+        public $className;
+        /**
+         * @var mixed the foreign key in this relation
+         */
+        public $foreignKey;
+       
+        /**
+         * @var string query clause.
+         */
+        public $condition='';
+        /**
+         * @var array the parameters that are to be bound to the condition.
+         * The keys are parameter placeholder names, and the values are parameter values.
+         */
+        public $params=array();
+
+        /**
+         * @var string order clause.
+         */
+        public $order='';
+
+        /**
+         * Constructor.
+         * @param string $name name of the relation
+         * @param string $className name of the related active resource class
+         * @param string $foreignKey foreign key for this relation
+         * @param array $options additional options (name=>value). The keys must be the property names of this class.
+         */
+        public function __construct($name,$className,$foreignKey,$options=array())
+        {
+                $this->name=$name;
+                $this->className=$className;
+                $this->foreignKey=$foreignKey;
+                foreach($options as $name=>$value)
+                        $this->$name=$value;
+        }
+
+        /**
+         * Merges this relation with a criteria specified dynamically.
+         * @param array $criteria the dynamically specified criteria
+         * @param boolean $fromScope whether the criteria to be merged is from scopes
+         */
+        public function mergeWith($criteria,$fromScope=false)
+        {
+                if($criteria instanceof EActiveResourceQueryCriteria)
+                        $criteria=$criteria->toArray();
+
+                if(isset($criteria['condition']) && $this->condition!==$criteria['condition'])
+                {
+                        if($this->condition==='')
+                                $this->condition=$criteria['condition'];
+                        else if($criteria['condition']!=='')
+                                $this->condition="{$this->condition}&{$criteria['condition']}";
+                }
+
+                if(isset($criteria['params']) && $this->params!==$criteria['params'])
+                        $this->params=array_merge($this->params,$criteria['params']);
+
+                if(isset($criteria['order']) && $this->order!==$criteria['order'])
+                {
+                        if($this->order==='')
+                                $this->order=$criteria['order'];
+                        else if($criteria['order']!=='')
+                                $this->order=$criteria['order'].', '.$this->order;
+                }
+        }
+}
+
+/**
+ * CActiveRelation is the base class for representing active relations that bring back related objects.
+ * @author Qiang Xue <qiang.xue@gmail.com>
+ * @version $Id$
+ * @package system.db.ar
+ * @since 1.0
+ */
+class EActiveResourceRelation extends EBaseActiveResourceRelation
+{
+        /**
+         * @var mixed scopes to apply
+         * Can be set to the one of the following:
+         * <ul>
+         * <li>Single scope: 'scopes'=>'scopeName'.</li>
+         * <li>Multiple scopes: 'scopes'=>array('scopeName1','scopeName2').</li>
+         * </ul>
+s         */
+         public $scopes;
+
+        /**
+         * Merges this relation with a criteria specified dynamically.
+         * @param array $criteria the dynamically specified criteria
+         * @param boolean $fromScope whether the criteria to be merged is from scopes
+         */
+        public function mergeWith($criteria,$fromScope=false)
+        {
+                if($criteria instanceof EActiveResourceQueryCriteria)
+                        $criteria=$criteria->toArray();
+                if($fromScope)
+                {
+                        if(isset($criteria['condition']) && $this->on!==$criteria['condition'])
+                        {
+                                if($this->on==='')
+                                        $this->on=$criteria['condition'];
+                                else if($criteria['condition']!=='')
+                                        $this->on="{$this->on}&{$criteria['condition']}";
+                        }
+                        unset($criteria['condition']);
+                }
+
+                parent::mergeWith($criteria);
+        }
+}
+
+
+/**
+ * EActiveResourceBelongsToRelation represents the parameters specifying a BELONGS_TO relation.
+ */
+class EActiveResourceBelongsToRelation extends EActiveResourceRelation
+{
+}
+
+
+/**
+ * EActiveResourceHasOneRelation represents the parameters specifying a HAS_ONE relation.
+ */
+class EActiveResourceHasOneRelation extends EActiveResourceRelation
+{
+}
+
+
+/**
+ * EActiveResourceHasManyRelation represents the parameters specifying a HAS_MANY relation.
+ */
+class EActiveResourceHasManyRelation extends EActiveResourceRelation
+{
+        /**
+         * @var integer limit of the rows to be selected. It is effective only for lazy loading this related object. Defaults to -1, meaning no limit.
+         */
+        public $limit=-1;
+        /**
+         * @var integer offset of the rows to be selected. It is effective only for lazy loading this related object. Defaults to -1, meaning no offset.
+         */
+        public $offset=-1;
+        /**
+         * @var string the name of the column that should be used as the key for storing related objects.
+         * Defaults to null, meaning using zero-based integer IDs.
+         */
+        public $index;
+
+        /**
+         * Merges this relation with a criteria specified dynamically.
+         * @param array $criteria the dynamically specified criteria
+         * @param boolean $fromScope whether the criteria to be merged is from scopes
+         */
+        public function mergeWith($criteria,$fromScope=false)
+        {
+                if($criteria instanceof EActiveResourceQueryCriteria)
+                        $criteria=$criteria->toArray();
+                parent::mergeWith($criteria,$fromScope);
+                if(isset($criteria['limit']) && $criteria['limit']>0)
+                        $this->limit=$criteria['limit'];
+
+                if(isset($criteria['offset']) && $criteria['offset']>=0)
+                        $this->offset=$criteria['offset'];
+
+                if(isset($criteria['index']))
+                        $this->index=$criteria['index'];
+        }
+}
+
+
+/**
+ * EActiveResourceManyManyRelation represents the parameters specifying a MANY_MANY relation.
+ */
+class EActiveResourceManyManyRelation extends EActiveResourceHasManyRelation
+{
 }
 
 ?>
