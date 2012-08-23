@@ -194,13 +194,15 @@ As of version 0.8 you are now able to define scopes in your models like you are 
         );
     }
 
-    public function topTen()
+    public function scopes()
     {
         return array(
-            'limit'=>10
-            'order'=>'created_at'
+            'topTen'=>array(
+                 'limit'=>10
+                 'order'=>'created_at'
+            )
         );
-    } 
+    }
 ~~~
 
 This would cause queries like this
