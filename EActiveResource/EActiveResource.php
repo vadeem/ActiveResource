@@ -415,14 +415,14 @@ abstract class EActiveResource extends CModel
         {
             $relatedClass=$md->relations[$name]->className;
             $route=$md->relations[$name]->route;
-            $relatedModel=$relatedClass::model()->populateRecord($this->getRequest($route,$md->relations[$name]->criteria));
+            $relatedModel=$relatedClass::model()->populateRecord($this->queryRelated($route,'GET',$md->relations[$name]->criteria));
             $this->_related[$name]=$relatedModel;
         }
         else if($relation instanceof EActiveResourceHasManyRelation)
         {
             $relatedClass=$md->relations[$name]->className;
             $route=$md->relations[$name]->route;
-            $relatedModels=$relatedClass::model()->populateRecords($this->getRequest($route,$md->relations[$name]->criteria));
+            $relatedModels=$relatedClass::model()->populateRecords($this->queryRelated($route,'GET',$md->relations[$name]->criteria));
             $this->_related[$name]=$relatedModels;
         }
 
@@ -1401,6 +1401,28 @@ abstract class EActiveResource extends CModel
                 
         $this->applyScopes($criteria);
         
+        $uri=$this->buildUri($route,$criteria);
+                        
+        $request=new EActiveResourceRequest;
+        $request->setUri($uri);
+        $request->setMethod($method);
+        $request->setData($data);
+        
+        return $this->getConnection()->query($request);
+    }
+    
+    /**
+     * Perform a query to load related models. 
+     * @param string $route The route to be sued by the query
+     * @param string $method The method to be used (defaults to GET)
+     * @param mixed $criteria Additional criteria for the query. Can either be an array or a EActiveResourceQueryCriteria object
+     * @param array $data Optional data to be sent
+     * @return EActiveResourceResponse The response 
+     */
+    public function queryRelated($route,$method='GET',$criteria=array(),$data=null)
+    {        
+        //create a criteria object out of an array
+                        
         $uri=$this->buildUri($route,$criteria);
                         
         $request=new EActiveResourceRequest;
