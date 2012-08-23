@@ -49,6 +49,7 @@ class EActiveResourceQueryCriteria extends CComponent
         
         public $offsetKey='page';
         public $limitKey='count';
+        public $sortKey='sort';
         
         /**
      * @var mixed scopes to apply
@@ -80,6 +81,12 @@ class EActiveResourceQueryCriteria extends CComponent
         {
                 foreach($data as $name=>$value)
                         $this->$name=$value;
+                if(Yii::app()->getComponent('activeresource')!=null && Yii::app()->getComponent('activeresource') instanceof EActiveResourceConnection)
+                {
+                    $this->limitKey=Yii::app()->activeresource->limitKey;
+                    $this->offsetKey=Yii::app()->activeresource->offsetKey;
+                    $this->sortKey=Yii::app()->activeresource->sortKey;
+                }
         }
 
         /**
