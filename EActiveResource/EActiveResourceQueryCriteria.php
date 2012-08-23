@@ -216,6 +216,8 @@ class EActiveResourceQueryCriteria extends CComponent
             
             $queryString.=implode('&',$parameters);
             
+            $queryString=strtr($queryString,$this->params);
+            
             return $queryString;
         }
 }
