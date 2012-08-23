@@ -211,7 +211,7 @@ class EActiveResourceQueryCriteria extends CComponent
         public function buildQueryString()
         {
             $queryString="";
-            if($this->condition!=="" || $this->limit!=="" || $this->offset!=="")
+            if($this->condition!=="" || $this->limit!=="" || $this->offset!=="" || $this->order!=="")
                 $queryString="?";
             
             $parameters=array($this->condition);
@@ -220,6 +220,8 @@ class EActiveResourceQueryCriteria extends CComponent
                 array_push($parameters, $this->offsetKey.'='.$this->offset);
             if($this->limit>0)
                 array_push($parameters, $this->limitKey.'='.$this->limit);
+            if($this->order!=="")
+                array_push($parameters, $this->sortKey.'='.$this->order);
             
             $queryString.=implode('&',$parameters);
             
