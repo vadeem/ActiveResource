@@ -24,6 +24,10 @@ class EActiveResourceConnection extends CApplicationComponent
     public $queryCachingCount=0;
     public $queryCacheID='cache';
     
+    public $limitKey='count';
+    public $offsetKey='page';
+    public $sortKey='sort';
+    
     private $_ch; //the curl handle used for reusable connections
     
     /**
