@@ -119,8 +119,7 @@ and look for the category "ext.EActiveResource"
 
     //or short version
     Person::model()->deleteById(1);
-
----
+~~~
 
 ##Criteria
 
@@ -128,7 +127,7 @@ As of version 0.8 you are able to pass criteria objects/arrays to the finder met
 The EActiveResourceQueryCriteria enables you to define your query string in an object oriented way. Therefore you have the following properties that you are
 able to define
 
----
+~~~
 
     $criteria=new EActiveResourceQueryCriteria(array(
         'condition'=>'name=:username'
@@ -143,12 +142,11 @@ able to define
     $criteria=new EActiveResourceQueryCriteria;
     $criteria->condition='name=:username';
     ....
-
----
+~~~
 
 You will probably ask how this will translate to an uri. Good question. Here's an example of using the above criteria with a finder
 
----
+~~~
 
     $criteria=new EActiveResourceQueryCriteria(array(
         'condition'=>'name=:username'
@@ -161,14 +159,13 @@ You will probably ask how this will translate to an uri. Good question. Here's a
     $models=User::model()->findAll($criteria);
 
     //GET to api.example.com/user?name=haensel*&page=1&count=10&order=name
-
----
+~~~
 
 "WTF? I never specified 'page' or 'count', so where do they come from?!" By default the "key" for limit=count and the key for offset=page.
 The reason for this is that paginators need to know which params to modify in order to create the right requests. Pagination via REST usually works by setting a page + a count parameter in the query string.
 If however your API works differently you aren't screwed. You can overwrite these keys by setting them in your "activeresource" component in your main config like
 
----
+~~~
 
     'activeresource'=>array(
         'class'=>'EActiveResourceConnection',
@@ -181,14 +178,13 @@ If however your API works differently you aren't screwed. You can overwrite thes
     ),
 
     //GET to api.example.com/user?name=haensel*&customOffsetKey=1&customLimitKey=10&sortKey=name
-
----
+~~~
 
 ##Scopes:
 
 As of version 0.8 you are now able to define scopes in your models like you are used to with ActiveRecord. Examples
 
----
+~~~
 
     //default scopes always used with finders
     public function defaultScope()
@@ -204,28 +200,26 @@ As of version 0.8 you are now able to define scopes in your models like you are 
             'limit'=>10
             'order'=>'created_at'
         );
-    }
-    
----
+    } 
+~~~
 
 This would cause queries like this
 
----
+~~~
 
     $model=Post::model()->findById(1);
     //GET api.example.com/user/1?published=true
 
     $model=Post::model()->topTen()->findAll();
     //GET api.example.com/user/1?published=true&order=created_at&count=10
-
----
+~~~
 
 ##Relations:
 
 As of version 0.8 you are able to define relations via HAS_ONE or HAS_MANY. There are NO BELONGS_TO or MANY_MANY relations as ActiveResource expects the following format for relations
 Example: A user has many posts. First we would need to adapt our routes in order to tell ActiveResource how to reach the related posts
 
----
+~~~
 
     public function routes()
     {
@@ -238,11 +232,11 @@ Example: A user has many posts. First we would need to adapt our routes in order
     }
 
     //GET to e.g.: api.example.com/user/1/posts
----
+~~~
 
 Now we need to define the relation. In this case we need a HAS_MANY relation (in our USER model). The third parameter is the route you specified above
 
----
+~~~
 
     public function relations()
     {
@@ -256,13 +250,12 @@ Now we need to define the relation. In this case we need a HAS_MANY relation (in
     $posts=User::model()->findById(1)->posts
 
     //2 GET reuqests. First to the user with id 1 and second to the posts uri of this user
-
----
+~~~
 
 You see, we are effectively ALWAYS using lazy loading. There is no such thing as a JOIN via the with() method!
 But what if you only want to get posts that are published? You can pass additional parameters to your relation like this:
 
----
+~~~
     public function relations()
     {
         return array(
@@ -271,5 +264,4 @@ But what if you only want to get posts that are published? You can pass addition
             'sortedPosts'=>array(self::HAS_MANY,'Post','posts','order'=>':order','params'=>array(':order'=>"title"))
         );
     }
-
----
+~~~
