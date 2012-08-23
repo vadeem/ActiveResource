@@ -11,7 +11,6 @@
  */
 abstract class EActiveResource extends CModel
 {
-    const BELONGS_TO='EActiveResourceBelongsToRelation';
     const HAS_ONE='EActiveResourceHasOneRelation';
     const HAS_MANY='EActiveResourceHasManyRelation';
     
@@ -410,23 +409,18 @@ abstract class EActiveResource extends CModel
                 $r=$name;
         unset($this->_related[$name]);
 
-        //lazy load resources here
-        if($relation instanceof EActiveResourceBelongsToRelation)
+        if($relation instanceof EActiveResourceHasOneRelation)
         {
             $relatedClass=$md->relations[$name]->className;
-            $relatedModel=$relatedClass::model()->findById($this->{$md->relations[$name]->foreignKey});
-            $this->_related[$name]=$relatedModel;
-        }
-        else if($relation instanceof EActiveResourceHasOneRelation)
-        {
-            $relatedClass=$md->relations[$name]->className;
-            $relatedModel=$relatedClass::model()->findById(array('condition'=>$md->relations[$name]->foreignKey.'='.$this->{$md->relations[$name]->foreignKey}));
+            $route=$md->relations[$name]->route;
+            $relatedModel=$relatedClass::model()->populateRecord($this->getRequest($route)->getData());
             $this->_related[$name]=$relatedModel;
         }
         else if($relation instanceof EActiveResourceHasManyRelation)
         {
             $relatedClass=$md->relations[$name]->className;
-            $relatedModels=$relatedClass::model()->findAll(array('condition'=>$md->relations[$name]->foreignKey.'='.$this->{$md->relations[$name]->foreignKey}));
+            $route=$md->relations[$name]->route;
+            $relatedModels=$relatedClass::model()->populateRecords($this->getRequest($route)->getData());
             $this->_related[$name]=$relatedModels;
         }
 
@@ -1485,9 +1479,9 @@ class EBaseActiveResourceRelation extends CComponent
          */
         public $className;
         /**
-         * @var mixed the foreign key in this relation
+         * @var mixed the route used to load the "subcollection"
          */
-        public $foreignKey;
+        public $route;
        
         /**
          * @var string query clause.
@@ -1511,11 +1505,11 @@ class EBaseActiveResourceRelation extends CComponent
          * @param string $foreignKey foreign key for this relation
          * @param array $options additional options (name=>value). The keys must be the property names of this class.
          */
-        public function __construct($name,$className,$foreignKey,$options=array())
+        public function __construct($name,$className,$route,$options=array())
         {
                 $this->name=$name;
                 $this->className=$className;
-                $this->foreignKey=$foreignKey;
+                $this->route=$route;
                 foreach($options as $name=>$value)
                         $this->$name=$value;
         }
@@ -1551,13 +1545,6 @@ class EBaseActiveResourceRelation extends CComponent
         }
 }
 
-/**
- * CActiveRelation is the base class for representing active relations that bring back related objects.
- * @author Qiang Xue <qiang.xue@gmail.com>
- * @version $Id$
- * @package system.db.ar
- * @since 1.0
- */
 class EActiveResourceRelation extends EBaseActiveResourceRelation
 {
         /**
@@ -1594,15 +1581,6 @@ s         */
                 parent::mergeWith($criteria);
         }
 }
-
-
-/**
- * EActiveResourceBelongsToRelation represents the parameters specifying a BELONGS_TO relation.
- */
-class EActiveResourceBelongsToRelation extends EActiveResourceRelation
-{
-}
-
 
 /**
  * EActiveResourceHasOneRelation represents the parameters specifying a HAS_ONE relation.
@@ -1650,14 +1628,6 @@ class EActiveResourceHasManyRelation extends EActiveResourceRelation
                 if(isset($criteria['index']))
                         $this->index=$criteria['index'];
         }
-}
-
-
-/**
- * EActiveResourceManyManyRelation represents the parameters specifying a MANY_MANY relation.
- */
-class EActiveResourceManyManyRelation extends EActiveResourceHasManyRelation
-{
 }
 
 ?>
