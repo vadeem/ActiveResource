@@ -140,6 +140,8 @@ abstract class EActiveResource extends CModel
             }
         }
                 
+        if(strpos($uri,'posts')>0)
+                throw new CException($uri);
         return $uri;
     }
     
@@ -408,19 +410,19 @@ abstract class EActiveResource extends CModel
         else
                 $r=$name;
         unset($this->_related[$name]);
-
+        
         if($relation instanceof EActiveResourceHasOneRelation)
         {
             $relatedClass=$md->relations[$name]->className;
             $route=$md->relations[$name]->route;
-            $relatedModel=$relatedClass::model()->populateRecord($this->getRequest($route)->getData());
+            $relatedModel=$relatedClass::model()->populateRecord($this->getRequest($route,$md->relations[$name]->criteria));
             $this->_related[$name]=$relatedModel;
         }
         else if($relation instanceof EActiveResourceHasManyRelation)
         {
             $relatedClass=$md->relations[$name]->className;
             $route=$md->relations[$name]->route;
-            $relatedModels=$relatedClass::model()->populateRecords($this->getRequest($route)->getData());
+            $relatedModels=$relatedClass::model()->populateRecords($this->getRequest($route,$md->relations[$name]->criteria));
             $this->_related[$name]=$relatedModels;
         }
 
@@ -1543,6 +1545,15 @@ class EBaseActiveResourceRelation extends CComponent
                                 $this->order=$criteria['order'].', '.$this->order;
                 }
         }
+        
+        public function getCriteria()
+        {
+            $criteria=new EActiveResourceQueryCriteria;
+            $criteria->condition=$this->condition;
+            $criteria->params=$this->params;
+            $criteria->order=$this->order;
+            return $criteria;
+        }
 }
 
 class EActiveResourceRelation extends EBaseActiveResourceRelation
@@ -1627,6 +1638,14 @@ class EActiveResourceHasManyRelation extends EActiveResourceRelation
 
                 if(isset($criteria['index']))
                         $this->index=$criteria['index'];
+        }
+        
+        public function getCriteria()
+        {
+            $criteria=parent::getCriteria();
+            $criteria->limit=$this->limit;
+            $criteria->offset=$this->offset;
+            return $criteria;
         }
 }
 
