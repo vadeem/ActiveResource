@@ -16,6 +16,7 @@ class EActiveResourceConnection extends CApplicationComponent
     public $acceptType;
     public $site;
     public $auth;
+    public $APIkey;
     public $ssl;
     public $allowNullValues=true;
     
@@ -94,6 +95,17 @@ class EActiveResourceConnection extends CApplicationComponent
         if(isset($this->ssl))
         {
             $request->setSSL($this->ssl['verifyPeer'], $this->ssl['verifyHost'], $this->ssl['pathToCert']);
+        }
+        
+        //API_KEY
+        if(isset($this->APIkey))
+        {
+        	if( isset($this->APIkey['header']) ){
+        		$request->setApiKey($this->APIkey['key'],$this->APIkey['header']);
+        	}
+        	else{
+        		$request->setApiKey($this->APIkey['key']);
+        	}
         }
         
         ///LOOK FOR CACHED RESPONSES FIRST
